@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
         // BleManager creation
         btManager = getSystemService(BluetoothManager::class.java)
         bleScanManager = BleScanManager(btManager, 5000, scanCallback = BleScanCallback({
-            val name = it?.device?.address
+            val name = it?.scanRecord?.deviceName
             if (name.isNullOrBlank()) return@BleScanCallback
 
             val device = BleDevice(name)
