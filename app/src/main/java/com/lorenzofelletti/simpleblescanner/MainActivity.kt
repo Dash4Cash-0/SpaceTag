@@ -10,15 +10,24 @@ import android.widget.Button
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.util.size
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.lorenzofelletti.permissions.PermissionManager
-import com.lorenzofelletti.permissions.dispatcher.dsl.*
+import com.lorenzofelletti.permissions.dispatcher.dsl.checkPermissions
+import com.lorenzofelletti.permissions.dispatcher.dsl.doOnDenied
+import com.lorenzofelletti.permissions.dispatcher.dsl.doOnGranted
+import com.lorenzofelletti.permissions.dispatcher.dsl.showRationaleDialog
+import com.lorenzofelletti.permissions.dispatcher.dsl.withRequestCode
 import com.lorenzofelletti.simpleblescanner.BuildConfig.DEBUG
 import com.lorenzofelletti.simpleblescanner.blescanner.BleScanManager
 import com.lorenzofelletti.simpleblescanner.blescanner.adapter.BleDeviceAdapter
 import com.lorenzofelletti.simpleblescanner.blescanner.model.BleDevice
 import com.lorenzofelletti.simpleblescanner.blescanner.model.BleScanCallback
+import com.lorenzofelletti.simpleblescanner.blescanner.model.DeviceDistance
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
     private lateinit var btnStartScan: Button
@@ -29,6 +38,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bleScanManager: BleScanManager
 
     private lateinit var foundDevices: MutableList<BleDevice>
+
+    private lateinit var deviceDistance: DeviceDistance
+
 
     @RequiresApi(Build.VERSION_CODES.S)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,21 +71,48 @@ class MainActivity : AppCompatActivity() {
         rvFoundDevices.layoutManager = LinearLayoutManager(this)
 
         // BleManager creation
+        val deviceDistance = DeviceDistance()
         btManager = getSystemService(BluetoothManager::class.java)
         bleScanManager = BleScanManager(btManager, 5000, scanCallback = BleScanCallback({
             val name = it?.scanRecord?.deviceName
-            if (name.isNullOrBlank()) return@BleScanCallback
+            val manufacturerData = it?.scanRecord?.manufacturerSpecificData
+            var uuid: UUID? = null
+            val rssi = it?.rssi
+            var txPower : Int? = null
+            val targetName = ("SpaceTag")
 
-            val device = BleDevice(name)
-            if (!foundDevices.contains(device)) {
-                if (DEBUG) {
-                    Log.d(
-                        BleScanCallback::class.java.simpleName,
-                        "${this.javaClass.enclosingMethod?.name} - Found device: $name"
-                    )
+            if(manufacturerData != null){
+                for (i in 0 until manufacturerData.size){
+                    val data = manufacturerData.valueAt(i)
+                    if(data != null && data.size >= 23){
+                        val uuidBytes = data.copyOfRange(2, 18)
+                        val buffer = ByteBuffer.wrap(uuidBytes).order(ByteOrder.BIG_ENDIAN)
+                        val msb = buffer.long
+                        val lsb = buffer.long
+                        txPower = data[data.size - 1].toInt()
+                        uuid = UUID(msb, lsb)
+                        Log.d("SCAN", "Parsed UUID: $uuid")
+                    }
                 }
-                foundDevices.add(device)
-                adapter.notifyItemInserted(foundDevices.size - 1)
+            }
+
+            if (name.isNullOrBlank()) return@BleScanCallback
+            if (uuid != null) {
+                if(name == targetName && rssi != null && txPower != null) {
+
+                    val distance = deviceDistance.calculateDistance(txPower, rssi)
+                    val device = BleDevice("$name $distance")
+                    if (!foundDevices.contains(device)) {
+                        if (DEBUG) {
+                            Log.d(
+                                BleScanCallback::class.java.simpleName,
+                                "${this.javaClass.enclosingMethod?.name} - Found device: $name"
+                            )
+                        }
+                        foundDevices.add(device)
+                        adapter.notifyItemInserted(foundDevices.size - 1)
+                    }
+                }
             }
         }))
 
